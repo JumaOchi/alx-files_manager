@@ -1,12 +1,15 @@
+/* eslint-disable import/no-named-as-default */
 import sha1 from 'sha1';
-import { ObjectID } from 'mongodb';
+import Queue from 'bull/lib/queue';
+import dbClient from '../utils/db';
 
-const dbClient = require('../utils/db');
-const redisClient = require('../utils/redis');
+const userQueue = new Queue('email sending');
 
-class UsersController {
-  static postNew(req, res) {
-    const { email, password } = req.body;
+export default class UsersController {
+  static async postNew(req, res) {
+    const email = req.body ? req.body.email : null;
+    const password = req.body ? req.body.password : null;
+
     if (!email) {
       res.status(400).json({ error: 'Missing email' });
       return;
@@ -15,44 +18,23 @@ class UsersController {
       res.status(400).json({ error: 'Missing password' });
       return;
     }
-    const users = dbClient.database.collections('users');
-    users.findOne({ email }, (err, out) => {
-      if (out) {
-        res.status(400).json({ error: 'Already exist' });
-      }
-      const hPassword = sha1(password);
-      users.insertOne(
-        {
-          email,
-          password: hPassword,
-        },
-      )
-        .then((newUser) => {
-          res.status(201).json({ id: newUser.insertedId, email });
-        })
-        .catch((err) => {
-          console.log(err);
-        });
-    });
+    const user = await (await dbClient.usersCollection()).findOne({ email });
+
+    if (user) {
+      res.status(400).json({ error: 'Already exist' });
+      return;
+    }
+    const insertionInfo = await (await dbClient.usersCollection())
+      .insertOne({ email, password: sha1(password) });
+    const userId = insertionInfo.insertedId.toString();
+
+    userQueue.add({ userId });
+    res.status(201).json({ email, id: userId });
   }
 
   static async getMe(req, res) {
-    const token = req.header('X-Token');
-    const userId = await redisClient.get(`auth_${token}`);
-    if (userId) {
-      const users = dbClient.database.collections('users');
-      const id = new ObjectID(userId);
-      users.findOne({ _id: id }, (err, out) => {
-        if (out) {
-          res.status(200).json({ email: out.email, id: userId });
-        } else {
-          res.status(404).json({ error: 'Not found' });
-        }
-      });
-    } else {
-      res.status(401).json({ error: 'Unauthorized' });
-    }
+    const { user } = req;
+
+    res.status(200).json({ email: user.email, id: user._id.toString() });
   }
 }
-
-module.exports = UsersController;
