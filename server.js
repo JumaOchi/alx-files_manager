@@ -1,12 +1,22 @@
-import express from 'express';
-import startServer from './libs/boot';
-import injectRoutes from './routes';
-import injectMiddlewares from './libs/middlewares';
+const express = require('express');
+const routes = require('./routes/index');
+const dbClient = require('./utils/db');
 
-const server = express();
+const app = express();
+const PORT = process.env.PORT || 5000;
 
-injectMiddlewares(server);
-injectRoutes(server);
-startServer(server);
+setTimeout(() => {
+  if (dbClient.isAlive()) {
+    console.log('MongoDB is connected');
+  } else {
+    console.log('MongoDB is not connected');
+  }
+}, 1000);
 
-export default server;
+app.use(express.urlencoded({ extended: true }));
+app.use(express.json());
+app.use('/', routes);
+
+app.listen(PORT, () => {
+  console.log(`Server listening on port ${PORT}`);
+});
